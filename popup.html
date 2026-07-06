@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<title>Timesheet Generator</title>
+<link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <h1>Timesheet Generator</h1>
+
+  <section class="card">
+    <label>Bulan &amp; Tahun</label>
+    <div class="row">
+      <select id="month"></select>
+      <input type="number" id="year" value="2026" min="2020" max="2035" />
+    </div>
+    <label>Bahasa / Language</label>
+    <div class="row">
+      <select id="lang">
+        <option value="id">Bahasa Indonesia</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+    <button id="btnHolidays" class="secondary">Cek Hari Libur</button>
+    <div id="holidayList" class="holiday-list"></div>
+  </section>
+
+  <section class="card">
+    <label>Template Tersimpan</label>
+    <div id="templateList" class="template-list">
+      <div class="muted">Belum ada template tersimpan.</div>
+    </div>
+    <label class="upload-label">Upload Template Baru (.xlsx)</label>
+    <input type="file" id="templateFile" accept=".xlsx" />
+  </section>
+
+  <section class="card">
+    <button id="btnGenerate" class="primary" disabled>Generate Timesheet</button>
+    <div id="status" class="muted"></div>
+  </section>
+
+  <script src="lib/exceljs.min.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
