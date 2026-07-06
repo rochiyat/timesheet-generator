@@ -77,6 +77,7 @@ const templateFileInput = document.getElementById("templateFile");
 const templateListEl = document.getElementById("templateList");
 const btnGenerate = document.getElementById("btnGenerate");
 const statusEl = document.getElementById("status");
+const holidayColorInput = document.getElementById("holidayColor");
 
 let currentHolidays = null;   // { "2026-01-01": "description", ... }
 let currentHolidaysKey = null; // "year-month"
@@ -107,6 +108,16 @@ langSelect.addEventListener("change", () => {
   if (currentHolidays) {
     renderHolidayList(currentHolidays);
   }
+});
+
+chrome.storage.local.get(["holidayColor"], (res) => {
+  if (res.holidayColor) {
+    holidayColorInput.value = res.holidayColor;
+  }
+});
+
+holidayColorInput.addEventListener("change", (e) => {
+  chrome.storage.local.set({ holidayColor: e.target.value });
 });
 
 renderTemplateList();
@@ -263,7 +274,7 @@ btnGenerate.addEventListener("click", async () => {
     await workbook.xlsx.load(buf);
     const worksheet = workbook.worksheets[0];
 
-    generateTimesheet(worksheet, year, month, holidays, lang);
+    generateTimesheet(worksheet, year, month, holidays, lang, holidayColorInput.value);
 
     const outBuf = await workbook.xlsx.writeBuffer();
     const blob = new Blob([outBuf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
@@ -359,7 +370,7 @@ function findRowContaining(worksheet, pattern, fromRow, toRow) {
   return null;
 }
 
-function generateTimesheet(worksheet, year, month, holidays, lang) {
+function generateTimesheet(worksheet, year, month, holidays, lang, holidayHex) {
   const { rowNumber: headerRow, map } = findHeaderRow(worksheet);
   const dateCol = map.date;
   const lastCol = Math.max(...Object.values(map));
@@ -371,8 +382,10 @@ function generateTimesheet(worksheet, year, month, holidays, lang) {
   const monthsList = isEn ? MONTHS_EN : MONTHS_ID;
   const daysList = isEn ? DAYS_EN : DAYS_ID;
 
-  // Use user-defined soft pink (#FFFCE7F3) directly for weekends and holidays
-  const PINK_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFCE7F3" } };
+  // Use user-defined holiday color or fallback to soft pink
+  const hex = (holidayHex || "#fce7f3").replace("#", "").toUpperCase();
+  const argb = hex.length === 6 ? "FF" + hex : hex;
+  const PINK_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: argb } };
   const NO_FILL = { type: "pattern", pattern: "none" };
 
   let weekdayFill = null;
@@ -423,17 +436,21 @@ function generateTimesheet(worksheet, year, month, holidays, lang) {
     // Populate date
     row.getCell(dateCol).value = `${dayName}, ${String(dateNum).padStart(2, "0")} ${monthsList[month - 1]} ${year}`;
 
-    // Populate remarks if holiday
-    const remarksCol = map.remarks;
-    if (remarksCol && holidayDesc) {
-      row.getCell(remarksCol).value = getHolidayDescription(holidayDesc, lang);
+    // Populate workDetail if holiday (as requested by user)
+    const workDetailCol = map.workDetail;
+    if (workDetailCol && holidayDesc) {
+      row.getCell(workDetailCol).value = getHolidayDescription(holidayDesc, lang);
     }
 
-    // Apply background color to the row cells
+    // Apply background color to the row cells by setting style object to avoid shared references
     for (let c = 1; c <= lastCol; c++) {
-      row.getCell(c).fill = isDayOff ? PINK_FILL : weekdayFill;
+      const cell = row.getCell(c);
+      const targetFill = isDayOff ? PINK_FILL : weekdayFill;
+      cell.style = {
+        ...cell.style,
+        fill: JSON.parse(JSON.stringify(targetFill))
+      };
     }
-    row.commit();
   }
 
   // Update "Total Mandays" formula if present

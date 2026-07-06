@@ -31,12 +31,17 @@ label {
   gap: 8px;
   margin-bottom: 8px;
 }
-select, input[type="number"], input[type="file"] {
+select, input[type="number"], input[type="file"], input[type="color"] {
   font-size: 13px;
   padding: 6px 8px;
   border: 1px solid #d1d5db;
   border-radius: 6px;
   width: 100%;
+}
+input[type="color"] {
+  height: 34px;
+  padding: 2px;
+  cursor: pointer;
 }
 select { flex: 2; }
 input[type="number"] { flex: 1; }
