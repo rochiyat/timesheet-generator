@@ -102,6 +102,16 @@ function populateMonths() {
 }
 
 populateMonths();
+// Pre-fetch holidays in the background when popup opens
+fetchHolidays(false);
+
+monthSelect.addEventListener("change", () => {
+  fetchHolidays(false);
+});
+
+yearInput.addEventListener("change", () => {
+  fetchHolidays(false);
+});
 
 langSelect.addEventListener("change", () => {
   populateMonths();
@@ -190,6 +200,21 @@ async function fetchHolidays(renderList) {
     holidayListEl.innerHTML = `<div class="muted">Memuat data hari libur...</div>`;
   }
 
+  // Check storage cache first to make operations instantaneous
+  const cacheKey = `holidays_${key}`;
+  try {
+    const res = await chrome.storage.local.get([cacheKey]);
+    if (res[cacheKey]) {
+      const map = res[cacheKey];
+      currentHolidays = map;
+      currentHolidaysKey = key;
+      if (renderList) renderHolidayList(map);
+      return map;
+    }
+  } catch (err) {
+    console.error("Gagal membaca cache hari libur:", err);
+  }
+
   try {
     const url = `https://api-hari-libur.vercel.app/api?year=${year}&month=${month}`;
     const resp = await fetch(url);
@@ -200,6 +225,10 @@ async function fetchHolidays(renderList) {
     }
     currentHolidays = map;
     currentHolidaysKey = key;
+
+    // Save to cache
+    chrome.storage.local.set({ [cacheKey]: map });
+
     if (renderList) renderHolidayList(map);
     return map;
   } catch (err) {
@@ -445,10 +474,9 @@ function generateTimesheet(worksheet, year, month, holidays, lang, holidayHex) {
     // Apply background color to the row cells by setting style object to avoid shared references
     for (let c = 1; c <= lastCol; c++) {
       const cell = row.getCell(c);
-      const targetFill = isDayOff ? PINK_FILL : weekdayFill;
       cell.style = {
         ...cell.style,
-        fill: JSON.parse(JSON.stringify(targetFill))
+        fill: isDayOff ? PINK_FILL : weekdayFill
       };
     }
   }
