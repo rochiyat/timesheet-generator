@@ -425,10 +425,67 @@ function generateTimesheet(worksheet, year, month, holidays, lang, holidayHex) {
   const daysInMonth = new Date(year, month, 0).getDate();
 
   // Adjust row count to match days in this month
+  const diff = daysInMonth - templateRowCount;
   if (daysInMonth > templateRowCount) {
-    worksheet.duplicateRow(end, daysInMonth - templateRowCount, true);
+    worksheet.duplicateRow(end, diff, true);
   } else if (daysInMonth < templateRowCount) {
-    worksheet.spliceRows(start + daysInMonth, templateRowCount - daysInMonth);
+    worksheet.spliceRows(start + daysInMonth, -diff);
+  }
+
+  // Update Excel table ranges and AutoFilters to prevent Excel corruption repair error
+  if (diff !== 0) {
+    // Update worksheet autoFilter if present
+    if (worksheet.autoFilter) {
+      let filterRef = null;
+      if (typeof worksheet.autoFilter === "string") {
+        filterRef = worksheet.autoFilter;
+      } else if (worksheet.autoFilter.ref) {
+        filterRef = worksheet.autoFilter.ref;
+      }
+      if (filterRef) {
+        const match = filterRef.match(/^([A-Z]+[0-9]+):([A-Z]+)([0-9]+)$/i);
+        if (match) {
+          const startCell = match[1];
+          const endColLetter = match[2];
+          const endRowNum = parseInt(match[3], 10);
+          const newEndRowNum = endRowNum + diff;
+          const newRef = `${startCell}:${endColLetter}${newEndRowNum}`;
+          if (typeof worksheet.autoFilter === "string") {
+            worksheet.autoFilter = newRef;
+          } else {
+            worksheet.autoFilter.ref = newRef;
+          }
+        }
+      }
+    }
+
+    // Update structured Table object references
+    let tables = [];
+    if (typeof worksheet.getTables === "function") {
+      tables = worksheet.getTables();
+    } else if (worksheet.tables) {
+      tables = Object.values(worksheet.tables);
+    }
+    tables.forEach((table) => {
+      if (!table) return;
+      let tModel = table.table || table;
+      if (tModel && tModel.tableRef) {
+        const match = tModel.tableRef.match(/^([A-Z]+[0-9]+):([A-Z]+)([0-9]+)$/i);
+        if (match) {
+          const startCell = match[1];
+          const endColLetter = match[2];
+          const endRowNum = parseInt(match[3], 10);
+          const newEndRowNum = endRowNum + diff;
+          tModel.tableRef = `${startCell}:${endColLetter}${newEndRowNum}`;
+          if (tModel.autoFilterRef) {
+            tModel.autoFilterRef = `${startCell}:${endColLetter}${newEndRowNum}`;
+          }
+          if (typeof table.commit === "function") {
+            table.commit();
+          }
+        }
+      }
+    });
   }
 
   // Fill in each date row
