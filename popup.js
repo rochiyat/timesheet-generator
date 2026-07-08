@@ -360,11 +360,15 @@ function findHeaderRow(worksheet) {
   for (let r = 1; r <= 20; r++) {
     const row = worksheet.getRow(r);
     const map = {};
+    let rowLastCol = 0;
     row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
       const norm = normalizeHeader(cell.value);
       if (norm && HEADER_ALIASES[norm]) map[HEADER_ALIASES[norm]] = colNumber;
+      if (cell.value !== null && cell.value !== undefined && cell.value !== "") {
+        if (colNumber > rowLastCol) rowLastCol = colNumber;
+      }
     });
-    if (map.date) return { rowNumber: r, map };
+    if (map.date) return { rowNumber: r, map, lastCol: rowLastCol };
   }
   throw new Error("Kolom 'Date' tidak ditemukan di template. Pastikan template sesuai format.");
 }
@@ -400,9 +404,8 @@ function findRowContaining(worksheet, pattern, fromRow, toRow) {
 }
 
 function generateTimesheet(worksheet, year, month, holidays, lang, holidayHex) {
-  const { rowNumber: headerRow, map } = findHeaderRow(worksheet);
+  const { rowNumber: headerRow, map, lastCol } = findHeaderRow(worksheet);
   const dateCol = map.date;
-  const lastCol = Math.max(...Object.values(map));
 
   const { start, end } = findDataRange(worksheet, headerRow, dateCol);
   const templateRowCount = end - start + 1;
@@ -417,17 +420,7 @@ function generateTimesheet(worksheet, year, month, holidays, lang, holidayHex) {
   const PINK_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: argb } };
   const NO_FILL = { type: "pattern", pattern: "none" };
 
-  let weekdayFill = null;
-  for (let r = start; r <= end; r++) {
-    const text = (worksheet.getRow(r).getCell(dateCol).value || "").toString();
-    const isWeekendRow = /saturday|sunday|sabtu|minggu/i.test(text);
-    const fill = worksheet.getRow(r).getCell(dateCol).fill;
-    if (!isWeekendRow && !weekdayFill) {
-      weekdayFill = cloneFill(fill);
-      break;
-    }
-  }
-  if (!weekdayFill) weekdayFill = NO_FILL;
+
 
   const daysInMonth = new Date(year, month, 0).getDate();
 
@@ -471,13 +464,20 @@ function generateTimesheet(worksheet, year, month, holidays, lang, holidayHex) {
       row.getCell(workDetailCol).value = getHolidayDescription(holidayDesc, lang);
     }
 
-    // Apply background color to the row cells by setting style object to avoid shared references
+    // Apply background color to the row cells starting from dateCol to lastCol
     for (let c = 1; c <= lastCol; c++) {
       const cell = row.getCell(c);
-      cell.style = {
-        ...cell.style,
-        fill: isDayOff ? PINK_FILL : weekdayFill
-      };
+      if (c >= dateCol) {
+        cell.style = {
+          ...cell.style,
+          fill: isDayOff ? PINK_FILL : NO_FILL
+        };
+      } else {
+        cell.style = {
+          ...cell.style,
+          fill: NO_FILL
+        };
+      }
     }
   }
 
@@ -502,6 +502,104 @@ function generateTimesheet(worksheet, year, month, holidays, lang, holidayHex) {
     } else {
       cell.value = `${original} - ${monthsList[month - 1]} ${year}`;
     }
+  }
+
+  // Helper to format string dates to match original style
+  function formatDateString(origStr, dateObj) {
+    const d = dateObj.getUTCDate();
+    const y = dateObj.getUTCFullYear();
+    const monthsShortEn = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const monthsShortId = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+    const usesEn = monthsShortEn.some(m => origStr.toLowerCase().includes(m.toLowerCase()));
+    const isEn = lang === "en";
+    const shortMonths = (usesEn || isEn) ? monthsShortEn : monthsShortId;
+    const longMonths = isEn ? MONTHS_EN : MONTHS_ID;
+    const mShort = shortMonths[dateObj.getUTCMonth()];
+    const mLong = longMonths[dateObj.getUTCMonth()];
+    let separator = "-";
+    if (origStr.includes("/")) separator = "/";
+    else if (origStr.includes(" ")) separator = " ";
+    else if (origStr.includes(".")) separator = ".";
+    const hasTwoDigitDay = /^[0-9]{2}/.test(origStr.trim());
+    const dayStr = hasTwoDigitDay ? String(d).padStart(2, "0") : String(d);
+    const hasLongMonth = MONTHS_EN.concat(MONTHS_ID).some(m => origStr.toLowerCase().includes(m.toLowerCase()));
+    const monthStr = hasLongMonth ? mLong : mShort;
+    const isMonthNumeric = /^[0-9]{1,2}[^0-9]+[0-9]{1,2}[^0-9]+[0-9]{4}$/.test(origStr.trim()) && !/[a-zA-Z]/.test(origStr);
+    if (isMonthNumeric) {
+      const hasTwoDigitMonth = /^[0-9]{1,2}[^0-9]+[0-9]{2}[^0-9]+/.test(origStr.trim());
+      const mNum = dateObj.getUTCMonth() + 1;
+      const monthNumStr = hasTwoDigitMonth ? String(mNum).padStart(2, "0") : String(mNum);
+      return `${dayStr}${separator}${monthNumStr}${separator}${y}`;
+    }
+    return `${dayStr}${separator}${monthStr}${separator}${y}`;
+  }
+
+  function updateDateCell(cell, day) {
+    const originalValue = cell.value;
+    const targetDate = new Date(Date.UTC(year, month - 1, day));
+    if (originalValue instanceof Date) {
+      cell.value = targetDate;
+    } else if (typeof originalValue === "string") {
+      cell.value = formatDateString(originalValue, targetDate);
+    } else if (typeof originalValue === "number") {
+      cell.value = targetDate;
+    } else {
+      cell.value = targetDate;
+    }
+  }
+
+  // Update Start Date and End Date cells if present in rows above headerRow
+  for (let r = 1; r < headerRow; r++) {
+    const row = worksheet.getRow(r);
+    row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+      const valStr = (cell.value || "").toString().toLowerCase().trim();
+      const isStart = valStr.includes("start date") || valStr.includes("tanggal mulai") || valStr.includes("tgl mulai");
+      const isEnd = valStr.includes("end date") || valStr.includes("tanggal selesai") || valStr.includes("tgl selesai");
+      if (isStart) {
+        const valueCell = row.getCell(colNumber + 1);
+        if (valueCell.value !== null && valueCell.value !== undefined && valueCell.value !== "") {
+          updateDateCell(valueCell, 1);
+        }
+      }
+      if (isEnd) {
+        const valueCell = row.getCell(colNumber + 1);
+        if (valueCell.value !== null && valueCell.value !== undefined && valueCell.value !== "") {
+          updateDateCell(valueCell, daysInMonth);
+        }
+      }
+    });
+  }
+
+  function isDateString(str) {
+    const s = str.toLowerCase().trim();
+    const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+                    "mei", "agu", "okt", "des", "juni", "juli", "agustus", "oktober", "desember"];
+    const hasMonthName = months.some(m => s.includes(m));
+    const hasNumericDate = /^[0-9]{1,2}[./-][0-9]{1,2}[./-][0-9]{2,4}$/.test(s);
+    const hasWordDate = /^[0-9]{1,2}\s+[a-z]+\s+[0-9]{4}$/.test(s) || /^[a-z]+\s+[0-9]{1,2},?\s+[0-9]{4}$/.test(s);
+    return hasMonthName || hasNumericDate || hasWordDate;
+  }
+
+  // Scan all cells in the worksheet (skipping the header row) for "Date: <date>" or "Tanggal: <date>" pattern
+  for (let r = 1; r <= worksheet.rowCount; r++) {
+    if (r === headerRow) continue;
+    const row = worksheet.getRow(r);
+    row.eachCell({ includeEmpty: false }, (cell) => {
+      const cellVal = cell.value;
+      if (cellVal && typeof cellVal === "string") {
+        const regex = /^((?:date|tanggal|tgl)\s*:\s*)(.+)$/i;
+        const match = cellVal.match(regex);
+        if (match) {
+          const prefix = match[1];
+          const dateStr = match[2];
+          if (isDateString(dateStr)) {
+            const targetDate = new Date(Date.UTC(year, month - 1, daysInMonth));
+            const newDateStr = formatDateString(dateStr, targetDate);
+            cell.value = prefix + newDateStr;
+          }
+        }
+      }
+    });
   }
 }
 
