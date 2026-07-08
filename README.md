@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="icons/icon128.png" alt="Timesheet Generator" width="80" />
+  <img src="https://raw.githubusercontent.com/rochiyat/timesheet-generator/master/icons/icon128.png" alt="Timesheet Generator" width="80" />
 </p>
 
 <h1 align="center">Timesheet Generator</h1>
